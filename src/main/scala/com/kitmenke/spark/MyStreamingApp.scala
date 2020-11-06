@@ -17,6 +17,9 @@ import org.apache.spark.sql.{DataFrame, SparkSession}
 object MyStreamingApp {
   lazy val logger: Logger = Logger.getLogger(this.getClass)
   val jobName = "MyStreamingApp"
+
+  implicit def stringToBytes(str: String): Array[Byte] = Bytes.toBytes(str)
+
   // TODO: define the schema for parsing data from Kafka
   // val schema: StructType = ???
 
@@ -33,23 +36,33 @@ object MyStreamingApp {
         .format("kafka")
         .option("kafka.bootstrap.servers", bootstrapServers)
         .option("subscribe", "reviews")
+        //next two lines are to read just first five lines - comment out to read just new
+        .option("startingOffsets", "earliest")
+        .option("maxOffsetsPerTrigger", "5")
         .load()
         .selectExpr("CAST(value AS STRING)")
 
       df.printSchema()
-
-      val out = compute(df).mapPartitions(partition=>{
+      import spark.implicits._
+      val out = compute(df).mapPartitions(partition => {
         var connection: Connection = null
         val conf = HBaseConfiguration.create()
-          conf.set("hbase.zookeeper.quorum", "cdh.kitmenke.com:2181")
-          connection = ConnectionFactory.createConnection(conf)
-          partition.map(row=>{
-            val table = connection.getTable(TableName.valueOf("table-name"))
-            val get = new Get(Bytes.toBytes(row.getAs[String]("customer_id")))
-            //get the row from HBase
-            //get the name and mail from result
-            //return new row with review+name and mail
-        })
+        conf.set("hbase.zookeeper.quorum", "cdh.kitmenke.com:2181")
+        connection = ConnectionFactory.createConnection(conf)
+        val rebeccasRow = partition.map(row => {
+          println(row)
+          val table = connection.getTable(TableName.valueOf("rebeccadohrman:users"))
+          val get = new Get(Bytes.toBytes(row.getAs[String]("customer_id")))
+          println("customer_id")
+          //get the row from HBase
+          val result = table.get(get)
+          val name: Array[Byte] = result.getValue("f1", "name")
+          //get the name and mail from result
+          Bytes.toString(name)
+          //return new row with review+name and mail
+        }).toList
+        connection.close()
+        rebeccasRow.iterator
       })
 
       val query = out.writeStream
