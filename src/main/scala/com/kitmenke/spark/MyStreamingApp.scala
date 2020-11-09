@@ -44,26 +44,37 @@ object MyStreamingApp {
 
       df.printSchema()
       import spark.implicits._
-      val out = compute(df).mapPartitions(partition => {
-        var connection: Connection = null
-        val conf = HBaseConfiguration.create()
-        conf.set("hbase.zookeeper.quorum", "cdh.kitmenke.com:2181")
-        connection = ConnectionFactory.createConnection(conf)
-        val rebeccasRow = partition.map(row => {
-          println(row)
-          val table = connection.getTable(TableName.valueOf("rebeccadohrman:users"))
-          val get = new Get(Bytes.toBytes(row.getAs[String]("customer_id")))
-          println("customer_id")
-          //get the row from HBase
-          val result = table.get(get)
-          val name: Array[Byte] = result.getValue("f1", "name")
-          //get the name and mail from result
-          Bytes.toString(name)
-          //return new row with review+name and mail
-        }).toList
-        connection.close()
-        rebeccasRow.iterator
-      })
+      val out =
+        compute(df).mapPartitions(partition => {
+          var connection: Connection = null
+          val conf = HBaseConfiguration.create()
+          conf.set("hbase.zookeeper.quorum", "cdh.kitmenke.com:2181")
+          connection = ConnectionFactory.createConnection(conf)
+          val rebeccasRow = partition.filter(row => {
+            if ((row.getAs[String]("customer_id")) != null) {
+              println(row)
+              true
+            } else {
+              false
+            }
+          })
+            .map(row => {
+              val table = connection.getTable(TableName.valueOf("rebeccadohrman:users"))
+              //get the row from HBase
+              val get = new Get(Bytes.toBytes(row.getAs[String]("customer_id")))
+              println("customer_id")
+              val result = table.get(get)
+              //get the name and mail from result
+              val name: Array[Byte] = result.getValue("f1", "name")
+              val mail: Array[Byte] = result.getValue("f1", "mail")
+              val review_body = new Get(Bytes.toBytes(row.getAs[String]("review_body")))
+              Bytes.toString(name)
+              //return new row with review+name and mail
+              (row.getAs[String]("customer_id"), Bytes.toString(name), Bytes.toString(mail), row.getAs[String]("review_body"))
+            }).toList
+          connection.close()
+          rebeccasRow.iterator
+        })
 
       val query = out.writeStream
         .outputMode(OutputMode.Append())
